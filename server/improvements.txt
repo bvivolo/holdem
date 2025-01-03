@@ -1,0 +1,5 @@
+clients saved with username as key, Player objects saves username instead of address
+
+GameLogic class?
+
+Access object variables througbh properties/getters?
