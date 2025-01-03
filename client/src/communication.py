@@ -37,7 +37,6 @@ class TcpThread(QRunnable):
 
 def send_message(conn: socket.socket, message: str) -> None:
     try:
-        message = message.encode('utf-8')
-        conn.sendall(message)
+        conn.sendall(message.encode('utf-8'))
     except Exception as e:
         print(e)

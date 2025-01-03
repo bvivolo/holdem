@@ -11,8 +11,7 @@ class MessageRouter:
 
     def send_msg_to_server(self, conn, message):
         if self.tcpside_handler:
-            response = self.tcpside_handler(conn, message)
-            return response
+            self.tcpside_handler(conn, message)
 
     def send_msg_to_app(self, message):
         if self.appside_handler:

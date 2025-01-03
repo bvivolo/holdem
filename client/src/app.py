@@ -352,6 +352,7 @@ class ChatBox(QWidget):
         self.conn = conn
 
     def set_username(self, username: str = '') -> None:
+        if not self.username_field.text(): return
         if not username:
             username = self.username_field.text()
         message = f'main:user:{username}'

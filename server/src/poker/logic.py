@@ -1,94 +1,25 @@
 import ast
-from poker.objects import CardGame, Player, Pot, Card
+import poker.objects as poker
+from poker.objects import (
+    Card, 
+    Player, 
+    PokerGame, 
+    Pot, 
+)
 import random
 import routing
 import threading
 import time
 
-games = {}
-
-class PokerGame:
-    def __init__(self, id: int):
-        self.id: int = id
-        self.players: dict[int, Player] = {}
-        self.deck: list[list[int]] = [(i, j) for j in range(1,14) for i in range(1, 5)]
-        self.hand_size = 2
-        self.sm_blind: int = 100
-        self.bg_blind: int = self.sm_blind * 2
-        self.button: int = -1
-        self.pots: list[Pot] = []
-        self.cards: list[Card] = []
-
-        garbage_thread = threading.Thread(target=self.destruct)
-        garbage_thread.start()
-
-    def handle_message(self, message: str) -> None:
-        type, cmd, data = message.split(':', 2)
-        match type:
-            case 'player':
-                match cmd:
-                    case 'add':
-                        response = self.add_player(data)
-                        return response
-                    case 'rmv':
-                        response = self.remv_player(data)
-                        return response
-                    case 'sitout':
-                        for player in self.players.values():
-                            if player.addr == data: player.sit_out = True
-                    case 'sitin':
-                        for player in self.players.values():
-                            if player.addr == data: player.sit_out = False
-            case 'get':
-                match cmd:
-                    case 'players':
-                        match data:
-                            case 'all':
-                                return [p.addr for p in self.players.values()]
-                    case 'id':
-                        return self.id
-            case 'close':
-                self.close()
-
-    def start(self):
-        game_thread = threading.Thread(target=run_game, args=(self))
-        game_thread.start()
-
-    def close(self):
-        self.send_update('close', '')
-        del self
-
-    def add_player(self, client_address: str):
-        player = Player(client_address)
-        for seat in range(8):
-            if seat not in self.players:
-                self.players[seat] = player
-                return {'code': '200', 'message': 'Player added'}
-        return {'code': '400', 'message': 'Game is Full'}
-
-    def remv_player(self, player_addr: str):
-        for seat in self.players:
-            if self.players[seat].addr == player_addr:
-                del self.players[seat]
-                return {'code': '200', 'message': 'Player removed'}
-        return {'code': '400', 'message': 'Player not found'}
-
-    def destruct(self):
-        while True:
-            clock = 0
-            while self and len(self.players) == 0:
-                time.sleep(1)
-                clock += 1
-                if clock == 30:
-                    routing.close_router(self.id)
-                    del games[self.id]
-            time.sleep(10)
-
-def create_game(type: str, game_id: int) -> None:
+def create_game(name: str, game_id: int) -> None:
+    print(type(game_id))
     game = PokerGame(game_id)
     router = routing.new_router(game_id)
     router.register_game_handler(game.handle_message)
-    games[game_id] = game
+    poker.games[game_id] = game
+    
+    game_thread = threading.Thread(target=run_game, args=(game))
+    game_thread.start()
 
 def run_game(game: PokerGame) -> None:
 
@@ -96,13 +27,11 @@ def run_game(game: PokerGame) -> None:
 
     players = game.players
     deck = game.deck
-    hand_size = game.hand_size
     button = game.button
     ftr = game.cards
     pots = game.pots
     sm_blind = game.sm_blind
     bg_blind = sm_blind * 2
-    active_pot = 0
 
     while True:
 
@@ -116,9 +45,10 @@ def run_game(game: PokerGame) -> None:
             players[seat].pay_blind(sm_blind)
         
         for s in seats:
-            hand = [deck.pop(random.randint(0,len(deck)-1)) for _ in hand_size]
+            hand = take_hand(deck, game.hand_size)
             players[s].deal(hand)
-            
+        
+        # Send message to app
         print("Cards dealt."); print("")
 
         turn = increment_seat(seats, button, 3)
@@ -129,12 +59,11 @@ def run_game(game: PokerGame) -> None:
             
             if not players[turn].in_pot[active_pot]: turn += 1; continue
 
-            #If all bets are equal and (not first round, bet amound is not BB, or not BB's turn) and not first turn of the round
+            #If all bets are equal and not first turn of the round
             if last_bet == players[turn].total_bet and turn_count >= len(seats):
                     
-                #Reset players' bet amounts
-                for p in players.values():
-                    p.reset_bet()
+                for player in players.values():
+                    player.reset_bet()
 
                 #Display pot total.
                 print(f"The pot is ${pots[0]}."); print("")
@@ -254,21 +183,23 @@ def set_btn_position(button: int, seats: list[int]) -> None:
         button = seats[random.randint(0, len(seats))]
     button = increment_seat(seats, button, 1)
     
-def get_active_seats(players: dict[int, Player]) -> list[int]:
-    seats = [seat for seat in players if players[seat].sit_out == False]
+def get_active_seats(players: list[Player]) -> list[int]:
+    seats = [player.seat for player in players if player.sit_out == False]
     return seats
 
 def get_blind_seats(seats: list[int], button: int) -> list[int]:
     n = len(seats)
-    button_idx = seats.index(button)
-    smBlindPos = seats[(button_idx + 1) % n]
-    bgBlindPos = seats[(button_idx + 2) % n]
-    return [smBlindPos, bgBlindPos]
+    sm_blind_pos = (button + 1) % n
+    bg_blind_pos = (button + 2) % n
+    return [sm_blind_pos, bg_blind_pos]
 
-def flip_cards(game: PokerGame, count: int) -> None:
+def flip_cards(game, count: int) -> None:
     for _ in range(count):
         game.cards.append(game.deck.pop(random.randint(0,len(game.deck)-1)))
 
 def increment_seat(seats: list[int], cur: int, count: int) -> int:
     new_seat = seats[(seats.index(cur) + count) % len(seats)]
     return new_seat
+
+def take_hand(deck: list[list[int]], hand_size: int) -> list[list[int, int]]:
+    return [deck.pop(random.randint(0,len(deck)-1)) for _ in hand_size]

@@ -2,11 +2,102 @@ import time
 import threading
 import routing
 
+games = {}
+
+class PokerGame:
+    hand_strengths = {
+        0 : "High Card",
+        3 : "Pair",
+        6 : "Two Pair",
+        7 : "3 of a Kind",
+        8 : "Straight",
+        9 : "Flush",
+        10 : "Full House",
+        12 : "4 of a Kind",
+        17 : "Straight Flush",
+        18 : "Royal Flush"
+    }
+
+    def __init__(self, id: int):
+        self.id: str = id
+        self.players: list[Player] = []
+        self.deck: list[list[int]] = [(i, j) for j in range(1,14) for i in range(1, 5)]
+        self.hand_size = 2
+        self.sm_blind: int = 100
+        self.button: int = 0
+        self.pots: list[Pot] = []
+        self.cards: list[Card] = []
+
+        self.actions_map = {
+            'player': {
+                'add': self.add_player, 
+                'rmv': self.rmv_player, 
+                'sitout': self.sitout_player, 
+                'sitin': self.sitin_player, 
+            }, 
+            'get': {
+                'players': self.get_players, 
+                'id': self.get_id
+            }
+        }
+
+        seppuku = threading.Thread(target=self.destruct)
+        seppuku.start()
+
+    def handle_message(self, message: str) -> None:
+        type, cmd, data = message.split(':', 2)
+        return self.actions_map[type][cmd](data)
+
+    def destruct(self):
+        while True:
+            clock = 0
+            while len(self.players) == 0:
+                time.sleep(1)
+                clock += 1
+                if clock == 30:
+                    routing.close_router(self.id)
+                    del games[self.id]
+            time.sleep(10)
+
+    def add_player(self, client_address: str):
+        if len(self.players) == 8:
+            return {'code': '400', 'message': 'Game is Full'}
+        
+        new_seat = len(self.players)
+        for seat, player in enumerate(self.players):
+            if seat != player.seat:
+                new_seat = seat
+
+        player = Player(new_seat, client_address)
+        self.players.append(player)
+        self.players.sort(key=lambda p: p.seat)
+        return {'code': '200', 'message': 'Player added'}
+
+    def rmv_player(self, rmv_addr: str):
+        for seat, player in enumerate(self.players):
+            if player.addr == rmv_addr:
+                self.players.pop(seat)
+                return {'code': '200', 'message': 'Player removed'}
+        return {'code': '400', 'message': 'Player not found'}
+    
+    def sitout_player(self, addr: str):
+        pass
+
+    def sitin_player(self, addr: str):
+        pass
+
+    def get_players(self, _):
+        return [p.addr for p in self.players]
+
+    def get_id(self, _):
+        return self.id
+
 class Player:
-    def __init__(self, addr: str):
+    def __init__(self, seat: int, addr: str):
         self.addr = addr
+        self.seat = seat
         self.balance = 0
-        self.betAmt = 0
+        self.cur_bet = 0
         self.hole = [[0,0],[0,0]]
         self.hand = [] #Final hand out of 7 cards
         self.rank = [0,0] #[Hand Type, Hand Type Strength] For scoring
@@ -18,11 +109,9 @@ class Player:
 
     def pay_blind(self, blind: int):
         if blind > self.balance:
-            self.total_bet = self.balance
-            self.balance = 0
-        else:
-            self.total_bet += blind
-            self.balance -= blind
+            blind = self.balance
+        self.cur_bet += blind
+        self.balance -= blind
 
     def ante_up(self, ante: int):
         if ante > self.balance:
@@ -37,41 +126,41 @@ class Player:
     #Take in proposed bet, call, or raise; check legality, transfer money, print & return result
     def bet(self, betAdd, currBet, bb, pots):
 
-        totalBet = betAdd + self.betAmt
+        totalBet = betAdd + self.cur_bet
         
         #Ensure legality of bet
-        if totalBet < bb: betAdd = bb - self.betAmt; print("The first bet must be at least the BB"); print("")
-        elif totalBet > bb and totalBet < bb*2: betAdd = bb*2 - self.betAmt; print("First raise must be twice BB."); print("")
+        if totalBet < bb: betAdd = bb - self.cur_bet; print("The first bet must be at least the BB"); print("")
+        elif totalBet > bb and totalBet < bb*2: betAdd = bb*2 - self.cur_bet; print("First raise must be twice BB."); print("")
         if betAdd > self.balance:
             betAdd = self.balance
         pots[0] += betAdd
         
         #Transfer from balance to bet
         self.balance -= betAdd
-        self.betAmt += betAdd
+        self.cur_bet += betAdd
         
         #Determine action and report.
-        if self.balance == 0: print(f"{self.name} goes All In for ${self.betAmt} ")
-        elif self.betAmt > currBet:
-            if first and round > 1: print(f"{self.name} bets ${self.betAmt}")
-            else: print(f"{self.name} raises to ${self.betAmt}")
-        elif self.betAmt == currBet: print(f"{self.name} calls for ${betAdd}")
+        if self.balance == 0: print(f"{self.name} goes All In for ${self.cur_bet} ")
+        elif self.cur_bet > currBet:
+            if first and round > 1: print(f"{self.name} bets ${self.cur_bet}")
+            else: print(f"{self.name} raises to ${self.cur_bet}")
+        elif self.cur_bet == currBet: print(f"{self.name} calls for ${betAdd}")
         print("")
         
-        return [pots, self.betAmt] if self.betAmt >= currBet else [pots, currBet]
+        return [pots, self.cur_bet] if self.cur_bet >= currBet else [pots, currBet]
     
     def reset_bet(self):
-        self.total_bet = 0
+        self.cur_bet = 0
 
     def fold(self):
-        self.total_bet = 0
+        self.cur_bet = 0
         self.in_pot = [False]
 
     def sit(self):
         self.sit_out = True
 
     def all_in(self):
-        self.total_bet = self.balance
+        self.cur_bet = self.balance
         self.balance = 0
 
     def cardsToDeck(self, deck):
@@ -173,15 +262,7 @@ class Player:
         [self.rank, self.hand] = [bestRank, bestHand]
 
 class Card:
-    def __init__(self, rank: int, suit: int):
-        self.rank = rank
-        self.suit = suit
-        self.kicker = True
-    
-    def __repr__(self):
-        return f'{self.suitDict[self.suit]}{self.rankDict[self.rank]}'
-    
-    rankDict = {
+    rank_reprs = {
         0 : "2", 1 : "3",
         2 : "4", 3 : "5",
         4 : "6", 5 : "7",
@@ -191,26 +272,19 @@ class Card:
         12 : "A", 
     }
 
-    suitDict = {
+    suit_reprs = {
         0 : "\u2660",
         1 : "\u2663",
         2 : "\u2665",
         3 : "\u2666",
     }
 
-    #Hand strength type values to names
-    handDict = {
-        0 : "High Card",
-        3 : "Pair",
-        6 : "Two Pair",
-        7 : "3 of a Kind",
-        8 : "Straight",
-        9 : "Flush",
-        10 : "Full House",
-        12 : "4 of a Kind",
-        17 : "Straight Flush",
-        18 : "Royal Flush"
-    }
+    def __init__(self, rank: int, suit: int):
+        self.rank = rank
+        self.suit = suit
+    
+    def __repr__(self):
+        return f'{self.suit_reprs[self.suit]}{self.rank_reprs[self.rank]}'
 
 class Pot:
     def __init__(self, seats: list[int]):

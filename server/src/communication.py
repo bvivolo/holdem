@@ -1,4 +1,4 @@
-from poker import poker
+from poker import logic
 import random
 import routing
 import socket
@@ -22,7 +22,7 @@ def handle_client(conn: socket.socket, addr: str, BUFFER_SIZE: int) -> None:
             case 'game':
                 match cmd:
                     case 'msg':
-                        distribute_message(addr, data)
+                        distribute_chat_message(addr, data)
                         continue
 
                     case 'new': 
@@ -54,11 +54,11 @@ def send_message(conn: socket.socket, message: str) -> None:
         print(e)
 
 # msg:
-def distribute_message(addr: str, data: str) -> None:
+def distribute_chat_message(addr: str, data: str) -> None:
     game_id, message = data.split(':', 1)
     try:
         router = routing.get_router(int(game_id))
-        player_addresses = router.send_msg_to_game('get:players:all')
+        player_addresses = router.send_msg_to_game('get:players')
         sender = clients[addr]['username']
         response = f'chat:msg:{sender}: {message}'
         for address in player_addresses:
@@ -78,7 +78,7 @@ def create_new_game(type: str):
     while game_id in all_game_ids:
         game_id = random.randint(10000, 99999)
 
-    poker.create_game(type, game_id)
+    logic.create_game(type, game_id)
     router = routing.get_router(game_id)
     router.register_server_handler(handle_game)
     return game_id
@@ -86,18 +86,12 @@ def create_new_game(type: str):
 def join_game(conn: socket.socket, addr: str, game_id: int) -> str:
     try:
         game_id = int(game_id)
+        router = routing.get_router(game_id)
     except Exception as e:
         print(e)
         return
     
     prev_game_id = clients[addr]['game']
-    if prev_game_id == game_id: return
-    try:
-        router = routing.get_router(game_id)
-    except Exception as e:
-        print(f'Router Key Error: {e}')
-        return
-    
     if prev_game_id:
         leave_game(addr, prev_game_id)
     game_message = f'player:add:{addr}'
