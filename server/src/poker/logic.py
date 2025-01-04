@@ -12,14 +12,13 @@ import threading
 import time
 
 def create_game(name: str, game_id: int) -> None:
-    print(type(game_id))
     game = PokerGame(game_id)
     router = routing.new_router(game_id)
     router.register_game_handler(game.handle_message)
     poker.games[game_id] = game
     
-    game_thread = threading.Thread(target=run_game, args=(game))
-    game_thread.start()
+    # game_thread = threading.Thread(target=run_game, args=(game))
+    # game_thread.start()
 
 def run_game(game: PokerGame) -> None:
 

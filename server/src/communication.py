@@ -58,12 +58,14 @@ def distribute_chat_message(addr: str, data: str) -> None:
     game_id, message = data.split(':', 1)
     try:
         router = routing.get_router(int(game_id))
-        player_addresses = router.send_msg_to_game('get:players')
+        player_addresses = router.send_msg_to_game('get:players:')
         sender = clients[addr]['username']
         response = f'chat:msg:{sender}: {message}'
+        print('sending')
         for address in player_addresses:
             conn = clients[address]['connection']
             send_message(conn, response)
+        print('sent')
     except Exception as e:
         print(e)
 
